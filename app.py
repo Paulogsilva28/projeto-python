@@ -61,14 +61,29 @@ if arquivo_pdf:
             
             async def narrar():
                 for trecho in trechos:
-                    if not trecho.strip(): continue
-                    v = voz_fem if "[F]" in trecho else (voz_masc if "[M]" in trecho else voz_narrador)
-                    t = trecho.replace("[F]", "").replace("[/F]", "").replace("[M]", "").replace("[/M]", "")
+                    # Limpa espaços e pula se estiver vazio
+                    texto_limpo = trecho.replace("[F]", "").replace("[/F]", "").replace("[M]", "").replace("[/M]", "").strip()
                     
-                    communicate = edge_tts.Communicate(t, v)
-                    async for chunk in communicate.stream():
-                        if chunk["type"] == "audio":
-                            audio_final.write(chunk["data"])
+                    if not texto_limpo: 
+                        continue
+                    
+                    # Define a voz
+                    v = voz_fem if "[F]" in trecho else (voz_masc if "[M]" in trecho else voz_narrador)
+                    
+                    try:
+                        communicate = edge_tts.Communicate(texto_limpo, v)
+                        audio_recebido = False
+                        async for chunk in communicate.stream():
+                            if chunk["type"] == "audio":
+                                audio_final.write(chunk["data"])
+                                audio_recebido = True
+                        
+                        if not audio_recebido:
+                            print(f"Aviso: Nenhum áudio gerado para o trecho: {texto_limpo[:30]}...")
+                            
+                    except Exception as e:
+                        print(f"Erro ao narrar trecho: {e}")
+                        continue # Pula para o próximo trecho em vez de quebrar o app
 
             asyncio.run(narrar())
             barra.progress((i + 1) / len(reader.pages))
