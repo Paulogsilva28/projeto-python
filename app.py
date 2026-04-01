@@ -6,87 +6,73 @@ import ollama
 import io
 import re
 
-st.set_page_config(page_title="IA Audiobook Leve", page_icon="⚡", layout="wide")
+# ... (Mantenha a função processar_texto_com_llama igual) ...
 
-# --- 1. FUNÇÃO COM MODELO LEVE (Llama 3.2 1B) ---
-def processar_texto_com_llama(texto_original):
-    prompt = f"""
-    Traduza para Português do Brasil de forma natural.
-    Identifique os diálogos:
-    - Use [M] para falas masculinas.
-    - Use [F] para falas femininas.
-    Retorne APENAS o texto traduzido e etiquetado.
-    Texto: {texto_original}
-    """
-    try:
-        # USANDO A VERSÃO 1B (A mais leve de todas)
-        response = ollama.chat(model='llama3.2:1b', messages=[{'role': 'user', 'content': prompt}])
-        return response['message']['content']
-    except Exception as e:
-        st.error(f"Erro: Verifique se rodou 'ollama pull llama3.2:1b' no terminal.")
-        return texto_original
+st.title("🎙️ Audiobook Builder: Tradução & Revisão")
 
-# --- 2. INTERFACE ---
-st.title("⚡ Audiobook Inteligente (Versão de Alta Performance)")
+# Estado da sessão para guardar o texto traduzido
+if 'texto_final' not in st.session_state:
+    st.session_state.texto_final = ""
 
-with st.sidebar:
-    st.header("Configurações")
-    voz_narrador = st.selectbox("Narrador:", ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"])
-    voz_masc = "pt-BR-DonatoNeural"
-    voz_fem = "pt-BR-ThalitaNeural"
-    st.success("Usando Llama 3.2 (Leve)")
-
-# --- 3. PROCESSAMENTO ---
-arquivo_pdf = st.file_uploader("📂 PDF", type="pdf")
+arquivo_pdf = st.file_uploader("📂 Suba o PDF", type="pdf")
 
 if arquivo_pdf:
-    reader = PdfReader(arquivo_pdf)
-    if st.button("🚀 Iniciar Tradução Rápida"):
-        audio_final = io.BytesIO()
+    # Passo 1: Tradução Automática
+    if st.button("🌍 1. Traduzir Livro Inteiro"):
+        reader = PdfReader(arquivo_pdf)
+        texto_acumulado = ""
         barra = st.progress(0)
-        status = st.empty()
         
-        # Processando 1 página por vez para ser ainda mais rápido
         for i in range(len(reader.pages)):
-            status.text(f"Processando página {i+1} de {len(reader.pages)}...")
             texto_bruto = reader.pages[i].extract_text()
-            
-            if not texto_bruto or not texto_bruto.strip(): continue
-
-            # IA Traduz e Etiqueta
-            texto_processado = processar_texto_com_llama(texto_bruto)
-            
-            # Divide para trocar as vozes
-            trechos = re.split(r'(\[F\].*?\[/F\]|\[M\].*?\[/M\])', texto_processado, flags=re.DOTALL)
-            
-            async def narrar():
-                for trecho in trechos:
-                    # Limpa espaços e pula se estiver vazio
-                    texto_limpo = trecho.replace("[F]", "").replace("[/F]", "").replace("[M]", "").replace("[/M]", "").strip()
-                    
-                    if not texto_limpo: 
-                        continue
-                    
-                    # Define a voz
-                    v = voz_fem if "[F]" in trecho else (voz_masc if "[M]" in trecho else voz_narrador)
-                    
-                    try:
-                        communicate = edge_tts.Communicate(texto_limpo, v)
-                        audio_recebido = False
-                        async for chunk in communicate.stream():
-                            if chunk["type"] == "audio":
-                                audio_final.write(chunk["data"])
-                                audio_recebido = True
-                        
-                        if not audio_recebido:
-                            print(f"Aviso: Nenhum áudio gerado para o trecho: {texto_limpo[:30]}...")
-                            
-                    except Exception as e:
-                        print(f"Erro ao narrar trecho: {e}")
-                        continue # Pula para o próximo trecho em vez de quebrar o app
-
-            asyncio.run(narrar())
+            if texto_bruto:
+                # Chama a IA para traduzir e etiquetar
+                traduzido = processar_texto_com_llama(texto_bruto)
+                texto_acumulado += traduzido + "\n\n"
             barra.progress((i + 1) / len(reader.pages))
+        
+        st.session_state.texto_final = texto_acumulado
+        st.success("Tradução concluída! Revise abaixo.")
 
-        st.audio(audio_final.getvalue())
-        st.download_button("📥 Baixar MP3", audio_final.getvalue(), "audiobook.mp3")
+# Passo 2: Área de Edição (Sempre visível se houver texto)
+if st.session_state.texto_final:
+    st.divider()
+    st.subheader("✍️ Revisão do Diretor")
+    st.info("Corrija o texto ou as tags [M]/[F] antes de gerar o áudio.")
+    
+    # O texto editado substitui o original no session_state
+    st.session_state.texto_final = st.text_area(
+        "Texto para Narração:", 
+        value=st.session_state.texto_final, 
+        height=400
+    )
+
+    # Passo 3: Narração do texto REVISADO
+    if st.button("🔊 2. Gerar Áudio Final"):
+        # Usamos o texto que está NA CAIXA agora, não o original da IA
+        trechos = re.split(r'(\[F\].*?\[/F\]|\[M\].*?\[/M\])', st.session_state.texto_final, flags=re.DOTALL)
+        
+        audio_final = io.BytesIO()
+        progresso_audio = st.progress(0)
+        
+        async def narrar_revisado():
+            for idx, trecho in enumerate(trechos):
+                texto_limpo = trecho.replace("[F]", "").replace("[/F]", "").replace("[M]", "").replace("[/M]", "").strip()
+                if not texto_limpo: continue
+                
+                v = voz_fem if "[F]" in trecho else (voz_masc if "[M]" in trecho else voz_narrador)
+                
+                try:
+                    communicate = edge_tts.Communicate(texto_limpo, v)
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_final.write(chunk["data"])
+                except:
+                    continue
+                progresso_audio.progress((idx + 1) / len(trechos))
+            return audio_final
+
+        with st.spinner("Sintetizando áudio revisado..."):
+            audio_pronto = asyncio.run(narrar_revisado())
+            st.audio(audio_pronto.getvalue())
+            st.download_button("📥 Baixar MP3 Final", audio_pronto.getvalue(), "audiobook_revisado.mp3")v
