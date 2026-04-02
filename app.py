@@ -18,11 +18,8 @@ def agente_tradutor(texto_ingles):
 
 def agente_revisor(texto_traduzido):
     prompt = f"""
-    Você é um editor experiente. Revise o texto abaixo:
-    1. Melhore a fluidez e naturalidade.
-    2. Remova termos robóticos ou palavras em outros idiomas.
-    3. Responda APENAS com o texto revisado.
-    TEXTO: {texto_traduzido}
+    Você está revisando um livro do gênero LitRPG. 
+    Mantenha termos como 'Level', 'Boss' e 'Crawler' se soarem melhor, mas garanta que a narrativa em português seja fluida e emocionante.{texto_traduzido}
     """
     try:
         response = ollama.chat(model='llama3.2:3b', messages=[{'role': 'user', 'content': prompt}])
@@ -30,27 +27,36 @@ def agente_revisor(texto_traduzido):
     except Exception as e:
         return texto_traduzido
 
-# --- 2. LOGICA DE DIVISÃO (OPÇÃO 2) ---
+# --- 2. LOGICA DE DIVISÃO (OPÇÃO 2) ---s
 
 def dividir_em_capitulos(pdf_reader):
     texto_completo = ""
     for page in pdf_reader.pages:
         texto_completo += page.extract_text() + "\n"
-    
-    # Procura por "Chapter X", "Capítulo X" ou apenas "Chapter" seguido de número
-    padrao = re.compile(r'(Chapter\s+\d+|Capítulo\s+\d+|CHAPTER\s+\d+)', re.IGNORECASE)
+
+    # REGEX ESPECÍFICO: Procura por [ 19 ], [ 20 ], etc.
+    # Ele ignora espaços extras dentro dos colchetes
+    padrao = re.compile(r'(\[\s*\d+\s*\])')
     
     partes = padrao.split(texto_completo)
     capitulos = {}
     
-    nome_capitulo = "Introdução"
-    for parte in partes:
-        if padrao.match(parte):
-            nome_capitulo = parte
-        else:
-            if parte.strip():
-                capitulos[nome_capitulo] = parte.strip()
+    nome_atual = "Introdução / Prólogo"
     
+    for i in range(len(partes)):
+        item = partes[i].strip()
+        if not item: continue
+        
+        # Se o item atual é o padrão [ número ], ele vira o título
+        if padrao.match(item):
+            nome_atual = f"Capítulo {item.replace('[', '').replace(']', '').strip()}"
+        else:
+            # Conteúdo do capítulo
+            if len(item) > 50: # Evita pegar apenas números de página perdidos
+                # LIMPEZA: Remove o rodapé do OceanofPDF que polui a tradução
+                item_limpo = item.replace("OceanofPDF.com", "")
+                capitulos[nome_atual] = item_limpo
+
     return capitulos
 
 # --- 3. INTERFACE STREAMLIT ---
