@@ -5,21 +5,47 @@ from pypdf import PdfReader
 import ollama
 import io
 import re
+import os
 
-# --- 1. CONFIGURAÇÃO DOS AGENTES ---
+# --- 1. CONFIGURAÇÃO DE CONTEXTO (GLOSSÁRIO) ---
+# Adicione aqui os termos que a IA costuma errar
+CONTEXTO_FIXO = """
+GLOSSÁRIO DE TRADUÇÃO (NÃO TRADUZIR NOMES PRÓPRIOS):
+- Carl: Protagonista humano (Manter 'Carl').
+- Donut: Gata falante (Manter 'Donut').
+- Mongo: Dinossauro de estimação (Manter 'Mongo').
+- Crawler: Sobrevivente do calabouço.
+- Xistera: Arma/Lançador de braço do Carl.
+- Hob-lobber: Bomba explosiva artesanal.
+- Pitch: Quando cor, use 'Breu' ou 'Escuro como tinta'.
+"""
 
-def agente_tradutor(texto_ingles):
-    prompt = f"Traduza fielmente para Português do Brasil. Mantenha o tom narrativo.\nTEXTO: {texto_ingles}"
+# --- 2. FUNÇÕES DE IA COM CACHE ---
+# O decorator @st.cache_data faz o Streamlit "lembrar" da tradução 
+# se o texto de entrada for o mesmo, poupando seu i5.
+
+@st.cache_data(show_spinner=False)
+def agente_tradutor_com_cache(texto_ingles):
+    prompt = f"Traduza fielmente para Português do Brasil:\n\n{texto_ingles}"
     try:
         response = ollama.chat(model='llama3.2:3b', messages=[{'role': 'user', 'content': prompt}])
         return response['message']['content']
     except Exception as e:
         return f"Erro na tradução: {e}"
 
-def agente_revisor(texto_traduzido):
+@st.cache_data(show_spinner=False)
+def agente_revisor_com_cache(texto_traduzido):
     prompt = f"""
-    Você está revisando um livro do gênero LitRPG. 
-    Mantenha termos como 'Level', 'Boss' e 'Crawler' se soarem melhor, mas garanta que a narrativa em português seja fluida e emocionante.{texto_traduzido}
+    Você é um editor de livros LitRPG. 
+    REGRAS DE CONTEXTO:
+    {CONTEXTO_FIXO}
+    
+    TAREFA:
+    Revise o texto para que soe natural e épico. 
+    Corrija erros de tradução literal (ex: 'skin crawl' vira 'arrepiar a pele').
+    
+    TEXTO:
+    {texto_traduzido}
     """
     try:
         response = ollama.chat(model='llama3.2:3b', messages=[{'role': 'user', 'content': prompt}])
@@ -27,115 +53,93 @@ def agente_revisor(texto_traduzido):
     except Exception as e:
         return texto_traduzido
 
-# --- 2. LOGICA DE DIVISÃO (OPÇÃO 2) ---s
-
+# --- 3. DIVISÃO POR CAPÍTULOS (ESTILO DUNGEON CRAWLER CARL) ---
 def dividir_em_capitulos(pdf_reader):
     texto_completo = ""
     for page in pdf_reader.pages:
         texto_completo += page.extract_text() + "\n"
 
-    # REGEX ESPECÍFICO: Procura por [ 19 ], [ 20 ], etc.
-    # Ele ignora espaços extras dentro dos colchetes
+    # Regex para capturar [ 19 ], [ 20 ] etc.
     padrao = re.compile(r'(\[\s*\d+\s*\])')
-    
     partes = padrao.split(texto_completo)
     capitulos = {}
     
-    nome_atual = "Introdução / Prólogo"
-    
-    for i in range(len(partes)):
-        item = partes[i].strip()
+    nome_atual = "Início"
+    for item in partes:
+        item = item.strip()
         if not item: continue
-        
-        # Se o item atual é o padrão [ número ], ele vira o título
         if padrao.match(item):
-            nome_atual = f"Capítulo {item.replace('[', '').replace(']', '').strip()}"
+            nome_atual = f"Capítulo {item.strip('[] ')}"
         else:
-            # Conteúdo do capítulo
-            if len(item) > 50: # Evita pegar apenas números de página perdidos
-                # LIMPEZA: Remove o rodapé do OceanofPDF que polui a tradução
-                item_limpo = item.replace("OceanofPDF.com", "")
-                capitulos[nome_atual] = item_limpo
-
+            if len(item) > 50:
+                capitulos[nome_atual] = item.replace("OceanofPDF.com", "")
     return capitulos
 
-# --- 3. INTERFACE STREAMLIT ---
-
-st.set_page_config(page_title="IA Audiobook Pro", layout="wide")
+# --- 4. INTERFACE ---
+st.set_page_config(page_title="IA Audiobook Master Pro", layout="wide")
 
 with st.sidebar:
     st.title("⚙️ Painel de Controle")
-    st.info("CPU: i5 8th Gen | RAM: 20GB")
-    voz_escolhida = st.selectbox("Voz do Narrador:", ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural", "pt-BR-ThalitaNeural"])
+    st.info("Cache Ativado | 20GB RAM")
+    voz = st.selectbox("Voz:", ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"])
     velocidade = st.slider("Velocidade:", 0.8, 1.2, 1.0)
-    rate = f"{'+' if velocidade >= 1 else ''}{int((velocidade - 1) * 100)}%"
+    
+    if st.button("🗑️ Limpar Cache"):
+        st.cache_data.clear()
+        st.success("Cache limpo!")
 
-st.title("🎙️ IA Audiobook Builder: Capítulos & Agentes")
+st.title("🎙️ Tradutor Multi-Agente com Memória")
 
-# Inicialização dos estados
-if 'capitulos_processados' not in st.session_state:
-    st.session_state.capitulos_processados = {}
+if 'livro_processado' not in st.session_state:
+    st.session_state.livro_processado = {}
 
-arquivo_pdf = st.file_uploader("📂 Suba o PDF", type="pdf")
+arquivo = st.file_uploader("📂 PDF do Dungeon Crawler Carl", type="pdf")
 
-if arquivo_pdf:
-    if st.button("🔍 1. Analisar Capítulos e Traduzir"):
-        reader = PdfReader(arquivo_pdf)
+if arquivo:
+    if st.button("🚀 Iniciar Processamento Inteligente"):
+        reader = PdfReader(arquivo)
+        mapa = dividir_em_capitulos(reader)
         
-        # Opção 2: Divisão
-        with st.spinner("Dividindo livro em capítulos..."):
-            mapa_capitulos = dividir_em_capitulos(reader)
+        status_ia = st.status("🤖 Agentes trabalhando...", expanded=True)
+        barra = st.progress(0)
         
-        if mapa_capitulos:
-            st.success(f"Encontrados {len(mapa_capitulos)} capítulos/partes.")
+        resultado = {}
+        total = len(mapa)
+        
+        for i, (nome, texto) in enumerate(mapa.items()):
+            status_ia.write(f"Processando {nome}...")
             
-            barra = st.progress(0)
-            status = st.empty()
+            # Aqui o cache entra em ação: se já foi traduzido, ele pula o Ollama
+            bruto = agente_tradutor_com_cache(texto[:3500]) # limite de segurança
+            revisado = agente_revisor_com_cache(bruto)
             
-            capitulos_finais = {}
-            total = len(mapa_capitulos)
+            resultado[nome] = revisado
+            barra.progress((i + 1) / total)
             
-            for i, (nome, conteudo) in enumerate(mapa_capitulos.items()):
-                status.text(f"Processando {nome} (Agentes Tradutor + Revisor)...")
-                
-                # Opção 3: Agentes (limitando a tradução a pedaços menores se o cap for gigante)
-                bruto_pt = agente_tradutor(conteudo[:4000]) # Limite preventivo para o i5
-                revisado_pt = agente_revisor(bruto_pt)
-                
-                capitulos_finais[nome] = revisado_pt
-                barra.progress((i + 1) / total)
-            
-            st.session_state.capitulos_processados = capitulos_finais
-            status.success("✅ Todo o livro foi traduzido e revisado!")
+        st.session_state.livro_processado = resultado
+        status_ia.update(label="✅ Tradução Completa!", state="complete", expanded=False)
 
-# --- 4. REVISÃO E NARRAÇÃO POR CAPÍTULO ---
-
-if st.session_state.capitulos_processados:
+# --- 5. ÁREA DE EDIÇÃO E ÁUDIO ---
+if st.session_state.livro_processado:
     st.divider()
-    st.subheader("✍️ Revisão por Capítulo")
+    cap_escolhido = st.selectbox("Escolha o Capítulo:", list(st.session_state.livro_processado.keys()))
     
-    escolha = st.selectbox("Selecione o capítulo para revisar/ouvir:", 
-                            list(st.session_state.capitulos_processados.keys()))
-    
-    # Área de edição para o capítulo selecionado
-    texto_editavel = st.text_area(f"Conteúdo de {escolha}:", 
-                                 value=st.session_state.capitulos_processados[escolha], 
-                                 height=300)
-    
-    # Atualiza a memória se você editar
-    st.session_state.capitulos_processados[escolha] = texto_editavel
+    # Caixa de contexto visível para você saber o que a IA usou
+    with st.expander("📝 Ver Glossário de Contexto Aplicado"):
+        st.code(CONTEXTO_FIXO)
 
-    if st.button(f"🔊 Gerar Áudio de {escolha}"):
-        audio_buffer = io.BytesIO()
-        
-        async def gerar_audio():
-            communicate = edge_tts.Communicate(texto_editavel, voz_escolhida, rate=rate)
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_buffer.write(chunk["data"])
-            return audio_buffer
+    texto_final = st.text_area("Edição Final:", st.session_state.livro_processado[cap_escolhido], height=350)
+    st.session_state.livro_processado[cap_escolhido] = texto_final
+
+    if st.button("🔊 Gerar MP3"):
+        async def play():
+            rate = f"{'+' if velocidade >= 1 else ''}{int((velocidade - 1) * 100)}%"
+            comm = edge_tts.Communicate(texto_final, voz, rate=rate)
+            buffer = io.BytesIO()
+            async for chunk in comm.stream():
+                if chunk["type"] == "audio": buffer.write(chunk["data"])
+            return buffer
 
         with st.spinner("Sintetizando..."):
-            audio_data = asyncio.run(gerar_audio())
-            st.audio(audio_data.getvalue())
-            st.download_button(f"📥 Baixar {escolha}.mp3", audio_data.getvalue(), f"{escolha}.mp3")
+            audio_out = asyncio.run(play())
+            st.audio(audio_out.getvalue())
