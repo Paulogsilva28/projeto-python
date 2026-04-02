@@ -4,109 +4,132 @@ import edge_tts
 from pypdf import PdfReader
 import ollama
 import io
+import re
 
-# --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="IA Tradutor de Livros", page_icon="📖", layout="wide")
+# --- 1. CONFIGURAÇÃO DOS AGENTES ---
 
-# --- 2. FUNÇÃO DE TRADUÇÃO (FOCO EM TEXTO LÍPIDO) ---
-def processar_texto_com_llama(texto_original):
-    """
-    Usa o Llama 3.2 3B para tradução literária pura.
-    """
+def agente_tradutor(texto_ingles):
+    prompt = f"Traduza fielmente para Português do Brasil. Mantenha o tom narrativo.\nTEXTO: {texto_ingles}"
+    try:
+        response = ollama.chat(model='llama3.2:3b', messages=[{'role': 'user', 'content': prompt}])
+        return response['message']['content']
+    except Exception as e:
+        return f"Erro na tradução: {e}"
+
+def agente_revisor(texto_traduzido):
     prompt = f"""
-    Traduza o texto abaixo de Inglês para Português do Brasil.
-    Mantenha o estilo narrativo do livro.
-    
-    REGRAS:
-    1. Tradução fiel e fluida.
-    2. NÃO adicione tags como [M] ou [F].
-    3. NÃO resuma e NÃO adicione comentários.
-    4. Responda APENAS com o texto traduzido.
-
-    TEXTO:
-    {texto_original}
+    Você é um editor experiente. Revise o texto abaixo:
+    1. Melhore a fluidez e naturalidade.
+    2. Remova termos robóticos ou palavras em outros idiomas.
+    3. Responda APENAS com o texto revisado.
+    TEXTO: {texto_traduzido}
     """
     try:
         response = ollama.chat(model='llama3.2:3b', messages=[{'role': 'user', 'content': prompt}])
         return response['message']['content']
     except Exception as e:
-        st.error(f"Erro na IA: {e}")
-        return texto_original
+        return texto_traduzido
 
-# --- 3. MENU LATERAL (CONFIGURAÇÕES) ---
+# --- 2. LOGICA DE DIVISÃO (OPÇÃO 2) ---
+
+def dividir_em_capitulos(pdf_reader):
+    texto_completo = ""
+    for page in pdf_reader.pages:
+        texto_completo += page.extract_text() + "\n"
+    
+    # Procura por "Chapter X", "Capítulo X" ou apenas "Chapter" seguido de número
+    padrao = re.compile(r'(Chapter\s+\d+|Capítulo\s+\d+|CHAPTER\s+\d+)', re.IGNORECASE)
+    
+    partes = padrao.split(texto_completo)
+    capitulos = {}
+    
+    nome_capitulo = "Introdução"
+    for parte in partes:
+        if padrao.match(parte):
+            nome_capitulo = parte
+        else:
+            if parte.strip():
+                capitulos[nome_capitulo] = parte.strip()
+    
+    return capitulos
+
+# --- 3. INTERFACE STREAMLIT ---
+
+st.set_page_config(page_title="IA Audiobook Pro", layout="wide")
+
 with st.sidebar:
-    st.title("⚙️ Configurações")
-    st.info("Modelo: Llama 3.2 3B | RAM: 20GB")
-    
-    st.subheader("Voz do Audiobook")
-    # Escolha apenas uma voz para o livro todo
-    voz_escolhida = st.selectbox("Selecione a Voz:", 
-                                ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural", 
-                                 "pt-BR-DonatoNeural", "pt-BR-ThalitaNeural"])
-    
-    st.divider()
-    velocidade = st.slider("Velocidade da fala:", 0.8, 1.3, 1.0, 0.05)
+    st.title("⚙️ Painel de Controle")
+    st.info("CPU: i5 8th Gen | RAM: 20GB")
+    voz_escolhida = st.selectbox("Voz do Narrador:", ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural", "pt-BR-ThalitaNeural"])
+    velocidade = st.slider("Velocidade:", 0.8, 1.2, 1.0)
     rate = f"{'+' if velocidade >= 1 else ''}{int((velocidade - 1) * 100)}%"
 
-# --- 4. ÁREA PRINCIPAL ---
-st.title("🎙️ IA Audiobook: Tradutor Simples")
+st.title("🎙️ IA Audiobook Builder: Capítulos & Agentes")
 
-if 'texto_final' not in st.session_state:
-    st.session_state.texto_final = ""
+# Inicialização dos estados
+if 'capitulos_processados' not in st.session_state:
+    st.session_state.capitulos_processados = {}
 
-arquivo_pdf = st.file_uploader("📂 Suba o PDF do livro", type="pdf")
+arquivo_pdf = st.file_uploader("📂 Suba o PDF", type="pdf")
 
 if arquivo_pdf:
-    if st.button("🌍 Passo 1: Traduzir Páginas"):
+    if st.button("🔍 1. Analisar Capítulos e Traduzir"):
         reader = PdfReader(arquivo_pdf)
-        texto_acumulado = ""
-        barra = st.progress(0)
-        status = st.empty()
         
-        for i in range(len(reader.pages)):
-            status.text(f"Traduzindo página {i+1} de {len(reader.pages)}...")
-            texto_bruto = reader.pages[i].extract_text()
-            
-            if texto_bruto and texto_bruto.strip():
-                traduzido = processar_texto_com_llama(texto_bruto)
-                texto_acumulado += traduzido + "\n\n"
-            
-            barra.progress((i + 1) / len(reader.pages))
+        # Opção 2: Divisão
+        with st.spinner("Dividindo livro em capítulos..."):
+            mapa_capitulos = dividir_em_capitulos(reader)
         
-        st.session_state.texto_final = texto_acumulado
-        status.success("✅ Tradução finalizada!")
+        if mapa_capitulos:
+            st.success(f"Encontrados {len(mapa_capitulos)} capítulos/partes.")
+            
+            barra = st.progress(0)
+            status = st.empty()
+            
+            capitulos_finais = {}
+            total = len(mapa_capitulos)
+            
+            for i, (nome, conteudo) in enumerate(mapa_capitulos.items()):
+                status.text(f"Processando {nome} (Agentes Tradutor + Revisor)...")
+                
+                # Opção 3: Agentes (limitando a tradução a pedaços menores se o cap for gigante)
+                bruto_pt = agente_tradutor(conteudo[:4000]) # Limite preventivo para o i5
+                revisado_pt = agente_revisor(bruto_pt)
+                
+                capitulos_finais[nome] = revisado_pt
+                barra.progress((i + 1) / total)
+            
+            st.session_state.capitulos_processados = capitulos_finais
+            status.success("✅ Todo o livro foi traduzido e revisado!")
 
-# --- 5. REVISÃO E ÁUDIO ---
-if st.session_state.texto_final:
+# --- 4. REVISÃO E NARRAÇÃO POR CAPÍTULO ---
+
+if st.session_state.capitulos_processados:
     st.divider()
-    st.subheader("✍️ Texto Traduzido (Editável)")
+    st.subheader("✍️ Revisão por Capítulo")
     
-    # Caixa de texto para ajustes manuais
-    st.session_state.texto_final = st.text_area(
-        "Confira a tradução antes de gerar o áudio:",
-        value=st.session_state.texto_final,
-        height=350
-    )
+    escolha = st.selectbox("Selecione o capítulo para revisar/ouvir:", 
+                            list(st.session_state.capitulos_processados.keys()))
+    
+    # Área de edição para o capítulo selecionado
+    texto_editavel = st.text_area(f"Conteúdo de {escolha}:", 
+                                 value=st.session_state.capitulos_processados[escolha], 
+                                 height=300)
+    
+    # Atualiza a memória se você editar
+    st.session_state.capitulos_processados[escolha] = texto_editavel
 
-    if st.button("🔊 Passo 2: Gerar MP3"):
+    if st.button(f"🔊 Gerar Áudio de {escolha}"):
         audio_buffer = io.BytesIO()
         
-        async def gerar_voz_unica():
-            # Como não tem mais tags, enviamos o texto todo de uma vez (ou em blocos grandes)
-            texto_para_ler = st.session_state.texto_final.strip()
-            
-            if texto_para_ler:
-                try:
-                    communicate = edge_tts.Communicate(texto_para_ler, voz_escolhida, rate=rate)
-                    async for chunk in communicate.stream():
-                        if chunk["type"] == "audio":
-                            audio_buffer.write(chunk["data"])
-                except Exception as e:
-                    st.error(f"Erro na geração de áudio: {e}")
+        async def gerar_audio():
+            communicate = edge_tts.Communicate(texto_editavel, voz_escolhida, rate=rate)
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_buffer.write(chunk["data"])
             return audio_buffer
 
-        with st.spinner("Gerando narração..."):
-            resultado = asyncio.run(gerar_voz_unica())
-            if resultado.getbuffer().nbytes > 0:
-                st.audio(resultado.getvalue())
-                st.download_button("📥 Baixar MP3", resultado.getvalue(), "meu_livro.mp3")
+        with st.spinner("Sintetizando..."):
+            audio_data = asyncio.run(gerar_audio())
+            st.audio(audio_data.getvalue())
+            st.download_button(f"📥 Baixar {escolha}.mp3", audio_data.getvalue(), f"{escolha}.mp3")
