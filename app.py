@@ -4,142 +4,104 @@ import edge_tts
 from pypdf import PdfReader
 import ollama
 import io
-import re
-import os
 
-# --- 1. CONFIGURAÇÃO DE CONTEXTO (GLOSSÁRIO) ---
-# Adicione aqui os termos que a IA costuma errar
-CONTEXTO_FIXO = """
-GLOSSÁRIO DE TRADUÇÃO (NÃO TRADUZIR NOMES PRÓPRIOS):
-- Carl: Protagonista humano (Manter 'Carl').
-- Donut: Gata falante (Manter 'Donut').
-- Mongo: Dinossauro de estimação (Manter 'Mongo').
-- Crawler: Sobrevivente do calabouço.
-- Xistera: Arma/Lançador de braço do Carl.
-- Hob-lobber: Bomba explosiva artesanal.
-- Pitch: Quando cor, use 'Breu' ou 'Escuro como tinta'.
-"""
+# --- 1. CONFIGURAÇÃO E ESTADO ---
+st.set_page_config(page_title="Audiobook Studio", layout="wide")
 
-# --- 2. FUNÇÕES DE IA COM CACHE ---
-# O decorator @st.cache_data faz o Streamlit "lembrar" da tradução 
-# se o texto de entrada for o mesmo, poupando seu i5.
+# Inicializa as variáveis de sessão para não perder dados ao trocar de aba
+if 'texto_traduzido' not in st.session_state:
+    st.session_state.texto_traduzido = ""
+if 'nome_arquivo' not in st.session_state:
+    st.session_state.nome_arquivo = "meu_audiobook"
 
+# Glossário fixo para manter a coerência (Carl, Donut, etc.)
+CONTEXTO = "Mantenha nomes próprios: Carl, Donut, Mongo. Traduza para PT-BR literário."
+
+# --- 2. FUNÇÕES DE IA (CACHE ATIVADO) ---
 @st.cache_data(show_spinner=False)
-def agente_tradutor_com_cache(texto_ingles):
-    prompt = f"Traduza fielmente para Português do Brasil:\n\n{texto_ingles}"
+def processar_ia(texto):
     try:
+        # Tradução Direta + Revisão em um único prompt potente para ganhar tempo
+        prompt = f"{CONTEXTO}\n\nTraduza e revise o seguinte texto:\n{texto}"
         response = ollama.chat(model='llama3.2:3b', messages=[{'role': 'user', 'content': prompt}])
         return response['message']['content']
     except Exception as e:
-        return f"Erro na tradução: {e}"
+        return f"Erro: {e}"
 
-@st.cache_data(show_spinner=False)
-def agente_revisor_com_cache(texto_traduzido):
-    prompt = f"""
-    Você é um editor de livros LitRPG. 
-    REGRAS DE CONTEXTO:
-    {CONTEXTO_FIXO}
+# --- 3. INTERFACE POR ABAS (TIPO DASHBOARD DE BI) ---
+aba1, aba2 = st.tabs(["🌍 1. Tradução (IA)", "🔊 2. Estúdio de Áudio"])
+
+# --- ABA 1: TRADUÇÃO ---
+with aba1:
+    st.header("Tradução Multi-Agente (Llama 3.2 3B)")
     
-    TAREFA:
-    Revise o texto para que soe natural e épico. 
-    Corrija erros de tradução literal (ex: 'skin crawl' vira 'arrepiar a pele').
+    arquivo_pdf = st.file_uploader("Suba o PDF original", type="pdf")
     
-    TEXTO:
-    {texto_traduzido}
-    """
-    try:
-        response = ollama.chat(model='llama3.2:3b', messages=[{'role': 'user', 'content': prompt}])
-        return response['message']['content']
-    except Exception as e:
-        return texto_traduzido
-
-# --- 3. DIVISÃO POR CAPÍTULOS (ESTILO DUNGEON CRAWLER CARL) ---
-def dividir_em_capitulos(pdf_reader):
-    texto_completo = ""
-    for page in pdf_reader.pages:
-        texto_completo += page.extract_text() + "\n"
-
-    # Regex para capturar [ 19 ], [ 20 ] etc.
-    padrao = re.compile(r'(\[\s*\d+\s*\])')
-    partes = padrao.split(texto_completo)
-    capitulos = {}
-    
-    nome_atual = "Início"
-    for item in partes:
-        item = item.strip()
-        if not item: continue
-        if padrao.match(item):
-            nome_atual = f"Capítulo {item.strip('[] ')}"
-        else:
-            if len(item) > 50:
-                capitulos[nome_atual] = item.replace("OceanofPDF.com", "")
-    return capitulos
-
-# --- 4. INTERFACE ---
-st.set_page_config(page_title="IA Audiobook Master Pro", layout="wide")
-
-with st.sidebar:
-    st.title("⚙️ Painel de Controle")
-    st.info("Cache Ativado | 20GB RAM")
-    voz = st.selectbox("Voz:", ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"])
-    velocidade = st.slider("Velocidade:", 0.8, 1.2, 1.0)
-    
-    if st.button("🗑️ Limpar Cache"):
-        st.cache_data.clear()
-        st.success("Cache limpo!")
-
-st.title("🎙️ Tradutor Multi-Agente com Memória")
-
-if 'livro_processado' not in st.session_state:
-    st.session_state.livro_processado = {}
-
-arquivo = st.file_uploader("📂 PDF do Dungeon Crawler Carl", type="pdf")
-
-if arquivo:
-    if st.button("🚀 Iniciar Processamento Inteligente"):
-        reader = PdfReader(arquivo)
-        mapa = dividir_em_capitulos(reader)
+    if arquivo_pdf:
+        st.session_state.nome_arquivo = arquivo_pdf.name.replace(".pdf", "")
         
-        status_ia = st.status("🤖 Agentes trabalhando...", expanded=True)
-        barra = st.progress(0)
-        
-        resultado = {}
-        total = len(mapa)
-        
-        for i, (nome, texto) in enumerate(mapa.items()):
-            status_ia.write(f"Processando {nome}...")
+        if st.button("🚀 Iniciar Tradução"):
+            reader = PdfReader(arquivo_pdf)
+            texto_completo = ""
+            barra = st.progress(0)
+            status = st.empty()
             
-            # Aqui o cache entra em ação: se já foi traduzido, ele pula o Ollama
-            bruto = agente_tradutor_com_cache(texto[:3500]) # limite de segurança
-            revisado = agente_revisor_com_cache(bruto)
+            for i, page in enumerate(reader.pages):
+                status.text(f"Processando página {i+1} de {len(reader.pages)}...")
+                bruto = page.extract_text()
+                if bruto.strip():
+                    # Limpeza básica de lixo de PDF
+                    bruto = bruto.replace("OceanofPDF.com", "")
+                    traduzido = processar_ia(bruto)
+                    texto_completo += traduzido + "\n\n"
+                barra.progress((i + 1) / len(reader.pages))
             
-            resultado[nome] = revisado
-            barra.progress((i + 1) / total)
-            
-        st.session_state.livro_processado = resultado
-        status_ia.update(label="✅ Tradução Completa!", state="complete", expanded=False)
+            st.session_state.texto_traduzido = texto_completo
+            status.success("✅ Tradução concluída! Vá para a aba 'Estúdio de Áudio'.")
 
-# --- 5. ÁREA DE EDIÇÃO E ÁUDIO ---
-if st.session_state.livro_processado:
-    st.divider()
-    cap_escolhido = st.selectbox("Escolha o Capítulo:", list(st.session_state.livro_processado.keys()))
+    # Área de visualização rápida
+    if st.session_state.texto_traduzido:
+        st.text_area("Texto Traduzido (Preview):", st.session_state.texto_traduzido, height=300)
+
+# --- ABA 2: ESTÚDIO DE ÁUDIO ---
+with aba2:
+    st.header("Configuração de Narração (Edge-TTS)")
     
-    # Caixa de contexto visível para você saber o que a IA usou
-    with st.expander("📝 Ver Glossário de Contexto Aplicado"):
-        st.code(CONTEXTO_FIXO)
+    if not st.session_state.texto_traduzido:
+        st.warning("⚠️ Primeiro, realize a tradução na Aba 1.")
+    else:
+        col1, col2 = st.columns([2, 1])
+        
+        with col2:
+            st.subheader("Ajustes de Voz")
+            voz = st.selectbox("Narrador:", ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural", "pt-BR-ThalitaNeural"])
+            vel = st.slider("Velocidade:", 0.8, 1.5, 1.0, 0.05)
+            rate = f"{'+' if vel >= 1 else ''}{int((vel - 1) * 100)}%"
+            
+            st.info("💡 Você pode editar o texto ao lado antes de gerar o áudio final.")
 
-    texto_final = st.text_area("Edição Final:", st.session_state.livro_processado[cap_escolhido], height=350)
-    st.session_state.livro_processado[cap_escolhido] = texto_final
+        with col1:
+            # Editor final - o que você mudar aqui é o que será narrado
+            texto_final = st.text_area("Editor Final do Roteiro:", 
+                                      value=st.session_state.texto_traduzido, 
+                                      height=500)
+            st.session_state.texto_traduzido = texto_final # Salva edições manuais
 
-    if st.button("🔊 Gerar MP3"):
-        async def play():
-            rate = f"{'+' if velocidade >= 1 else ''}{int((velocidade - 1) * 100)}%"
-            comm = edge_tts.Communicate(texto_final, voz, rate=rate)
-            buffer = io.BytesIO()
-            async for chunk in comm.stream():
-                if chunk["type"] == "audio": buffer.write(chunk["data"])
-            return buffer
+        if st.button("🎙️ Gerar MP3 Final"):
+            async def gerar_audio():
+                communicate = edge_tts.Communicate(texto_final, voz, rate=rate)
+                buffer = io.BytesIO()
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        buffer.write(chunk["data"])
+                return buffer
 
-        with st.spinner("Sintetizando..."):
-            audio_out = asyncio.run(play())
-            st.audio(audio_out.getvalue())
+            with st.spinner("Sintetizando voz neural... Aguarde."):
+                audio_data = asyncio.run(gerar_audio())
+                st.audio(audio_data.getvalue())
+                st.download_button(
+                    label="📥 Baixar Audiobook (.mp3)",
+                    data=audio_data.getvalue(),
+                    file_name=f"{st.session_state.nome_arquivo}.mp3",
+                    mime="audio/mp3"
+                )
