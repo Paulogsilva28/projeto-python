@@ -2,7 +2,7 @@ import streamlit as st
 import asyncio
 import edge_tts
 import io
-import textwrap
+from pypdf import PdfReader
 
 # --- 1. ESTADO GLOBAL ---
 if 'texto_final' not in st.session_state:
@@ -19,6 +19,19 @@ aba1, aba2 = st.tabs(["🌍 1. Tradução (IA)", "🔊 2. Estúdio de Áudio"])
 with aba1:
     st.header("Tradução e Refinamento")
 
+    uploaded_pdf = st.file_uploader(
+        "📄 Envie um PDF para extrair o texto:",
+        type=["pdf"],
+        help="O texto será extraído automaticamente."
+    )
+
+    if uploaded_pdf:
+        with st.spinner("Extraindo texto do PDF..."):
+            texto_extraido = extrair_texto_pdf(uploaded_pdf)
+        st.success(f"PDF carregado! {len(texto_extraido)} caracteres extraídos.")
+        if not st.session_state.texto_final:
+            st.session_state.texto_final = texto_extraido
+
     temp_text = st.text_area(
         "Edite o texto traduzido aqui:",
         value=st.session_state.texto_final,
@@ -31,6 +44,16 @@ with aba1:
         st.success("Texto enviado para o Estúdio de Áudio! Mude de aba acima.")
 
 # --- 3. HELPERS ---
+def extrair_texto_pdf(uploaded_file):
+    """Extrai texto de um PDF enviado pelo usuário."""
+    reader = PdfReader(uploaded_file)
+    texto = ""
+    for page in reader.pages:
+        t = page.extract_text()
+        if t:
+            texto += t + "\n\n"
+    return texto.strip()
+
 def split_text(text, max_chars=3000):
     """Divide texto em chunks que o edge-tts consegue processar."""
     chunks = []
