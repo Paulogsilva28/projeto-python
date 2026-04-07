@@ -4,44 +4,63 @@ import edge_tts
 import io
 from pypdf import PdfReader
 
-# --- 1. ESTADO GLOBAL ---
+# --- 0. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(
+    page_title="Audiobook Studio",
+    page_icon="🎧",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# --- 1. CSS CUSTOMIZADO ---
+st.markdown("""
+<style>
+    /* Centraliza e dá respiro ao layout */
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+        max-width: 960px;
+    }
+
+    /* Headers mais marcantes */
+    h1, h2, h3 {
+        font-weight: 700 !important;
+    }
+
+    /* Badges de status/informação */
+    .info-badge {
+        display: inline-block;
+        background: #2a2a40;
+        color: #ccc;
+        padding: 0.35rem 0.9rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        margin-bottom: 1rem;
+        border: 1px solid #3a3a55;
+    }
+
+    /* Botões arredondados */
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+        padding: 0.55rem 1.8rem;
+        transition: all 0.2s;
+    }
+
+    /* Esconde menu e footer padrão do Streamlit */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
+# --- 2. ESTADO GLOBAL ---
 if 'texto_final' not in st.session_state:
     st.session_state.texto_final = ""
 if 'voz' not in st.session_state:
     st.session_state.voz = "pt-BR-AntonioNeural"
 if 'velocidade' not in st.session_state:
     st.session_state.velocidade = 1.0
-
-# --- 2. ABAS ---
-aba1, aba2 = st.tabs(["🌍 1. Tradução (IA)", "🔊 2. Estúdio de Áudio"])
-
-# --- ABA 1: TRADUÇÃO E EDIÇÃO ---
-with aba1:
-    st.header("Tradução e Refinamento")
-
-    uploaded_pdf = st.file_uploader(
-        "📄 Envie um PDF para extrair o texto:",
-        type=["pdf"],
-        help="O texto será extraído automaticamente."
-    )
-
-    if uploaded_pdf:
-        with st.spinner("Extraindo texto do PDF..."):
-            texto_extraido = extrair_texto_pdf(uploaded_pdf)
-        st.success(f"PDF carregado! {len(texto_extraido)} caracteres extraídos.")
-        if not st.session_state.texto_final:
-            st.session_state.texto_final = texto_extraido
-
-    temp_text = st.text_area(
-        "Edite o texto traduzido aqui:",
-        value=st.session_state.texto_final,
-        height=400,
-        help="O que você escrever aqui será enviado para o Estúdio de Áudio."
-    )
-
-    if st.button("💾 Salvar para Áudio"):
-        st.session_state.texto_final = temp_text
-        st.success("Texto enviado para o Estúdio de Áudio! Mude de aba acima.")
 
 # --- 3. HELPERS ---
 def extrair_texto_pdf(uploaded_file):
@@ -96,7 +115,7 @@ async def gerar_audiobook_com_progresso(texto, voz, rate, progress_bar, status_t
     for i, chunk in enumerate(chunks):
         pct = i / total
         progress_bar.progress(pct)
-        status_text.text(f"Sintetizando parte {i+1} de {total}...")
+        status_text.text(f"Sintetizando parte {i + 1} de {total}...")
 
         communicate = edge_tts.Communicate(chunk, voz, rate=rate)
         async for part in communicate.stream():
@@ -113,65 +132,128 @@ def run_async(coro):
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    # Já existe um loop rodando — usar nest_asyncio ou novo loop
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor() as executor:
         future = executor.submit(asyncio.run, coro)
         return future.result()
 
-# --- ABA 2: ESTÚDIO DE ÁUDIO ---
+# --- 4. TÍTULO ---
+st.title("🎧 Audiobook Studio")
+st.caption("Transforme PDFs em audiobooks com voz neural — edite, ajuste e gere MP3")
+st.divider()
+
+# --- 5. ABAS ---
+aba1, aba2 = st.tabs(["📖 Editor de Texto", "🎙️ Estúdio de Áudio"])
+
+# --- ABA 1: EDITOR ---
+with aba1:
+    st.subheader("Entrada de Texto")
+
+    uploaded_pdf = st.file_uploader(
+        "Arraste ou selecione um PDF para extrair o texto",
+        type=["pdf"],
+    )
+
+    if uploaded_pdf:
+        with st.spinner("Extraindo texto do PDF..."):
+            texto_extraido = extrair_texto_pdf(uploaded_pdf)
+        st.success(f"PDF carregado — {len(texto_extraido):,} caracteres extraídos")
+        if not st.session_state.texto_final:
+            st.session_state.texto_final = texto_extraido
+
+    st.text_area(
+        "Edite o texto:",
+        value=st.session_state.texto_final,
+        height=420,
+        key="editor_texto",
+        label_visibility="collapsed",
+        placeholder="Cole seu texto aqui ou envie um PDF acima...",
+    )
+
+    if st.button("Salvar para Áudio", use_container_width=True, type="primary"):
+        st.session_state.texto_final = st.session_state.editor_texto
+        chars = len(st.session_state.texto_final)
+        st.success(f"Texto salvo ({chars:,} caracteres). Vá para o Estúdio de Áudio.")
+
+# --- ABA 2: ESTÚDIO ---
 with aba2:
-    st.header("Configuração de Narração")
-
     if not st.session_state.texto_final:
-        st.warning("⚠️ O editor está vazio. Escreva ou traduza algo na Aba 1.")
+        st.info("O editor está vazio. Envie um PDF ou escreva algo na aba Editor de Texto.")
     else:
-        col1, col2 = st.columns([2, 1])
+        # Info badges
+        chars = len(st.session_state.texto_final)
+        chunks_count = len(split_text(st.session_state.texto_final))
+        st.markdown(
+            f'<span class="info-badge">Texto: {chars:,} caracteres</span> '
+            f'<span class="info-badge">~{chunks_count} partes para narrar</span>',
+            unsafe_allow_html=True
+        )
 
-        with col2:
+        # Config + preview lado a lado
+        col_settings, col_preview = st.columns([1, 2])
+
+        with col_settings:
             st.subheader("Ajustes")
             voz = st.selectbox(
-                "Narrador:",
-                ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"],
+                "Narrador",
+                ["pt-BR-AntonioNeural (masculina)", "pt-BR-FranciscaNeural (feminina)"],
                 index=0 if st.session_state.voz == "pt-BR-AntonioNeural" else 1
             )
             vel = st.slider(
-                "Velocidade:", 0.8, 1.3,
+                "Velocidade", 0.8, 1.3,
                 float(st.session_state.velocidade), 0.05
             )
-            # Salva preferências
             st.session_state.voz = voz
             st.session_state.velocidade = vel
-            # Cálculo correto do rate
+            # Extrai nome curto da voz
+            voz_label = voz.split("(")[1].rstrip(")") if "(" in voz else voz.split("-")[2]
             rate_val = round((vel - 1) * 100)
             rate = f"+{rate_val}%" if rate_val >= 0 else f"{rate_val}%"
 
-        with col1:
-            st.info("Revisão final do roteiro:")
-            roteiro_final = st.text_area("Roteiro:", value=st.session_state.texto_final, height=300)
+            st.markdown(
+                f'<span class="info-badge">Voz: {voz_label}</span> '
+                f'<span class="info-badge">Rate: {rate}</span>',
+                unsafe_allow_html=True
+            )
 
-        if st.button("🎙️ Gerar MP3 agora"):
+        with col_preview:
+            st.subheader("Roteiro final")
+            st.text_area(
+                "Confira e edite se necessário",
+                value=st.session_state.texto_final,
+                height=280,
+                key="roteiro_final",
+                label_visibility="collapsed",
+            )
+
+        # Botão de gerar
+        if st.button("Gerar Audiobook", use_container_width=True, type="primary"):
+            roteiro = st.session_state.roteiro_final
             progress_bar = st.progress(0, text="Iniciando síntese...")
             status_text = st.empty()
 
             try:
                 resultado = run_async(
-                    gerar_audiobook_com_progresso(roteiro_final, voz, rate, progress_bar, status_text)
+                    gerar_audiobook_com_progresso(roteiro, voz, rate, progress_bar, status_text)
                 )
 
                 if resultado.getbuffer().nbytes > 0:
-                    status_text.text("✅ Audiobook pronto!")
+                    status_text.text("Audiobook pronto!")
                     progress_bar.progress(1.0, text="Concluído!")
                     st.divider()
-                    st.subheader("📥 Seu Audiobook está pronto!")
-                    st.audio(resultado.getvalue())
 
-                    st.download_button(
-                        label="Baixar arquivo MP3",
-                        data=resultado.getvalue(),
-                        file_name="audiobook_revisado.mp3",
-                        mime="audio/mp3"
-                    )
+                    col_audio, col_dl = st.columns([3, 1])
+                    with col_audio:
+                        st.audio(resultado.getvalue())
+                    with col_dl:
+                        st.download_button(
+                            label="Baixar MP3",
+                            data=resultado.getvalue(),
+                            file_name="audiobook.mp3",
+                            mime="audio/mp3",
+                            type="primary",
+                            use_container_width=True,
+                        )
             except Exception as e:
                 progress_bar.empty()
                 status_text.empty()
