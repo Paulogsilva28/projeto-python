@@ -194,10 +194,12 @@ with aba2:
 
         with col_settings:
             st.subheader("Ajustes")
-            voz = st.selectbox(
-                "Narrador",
-                ["pt-BR-AntonioNeural (masculina)", "pt-BR-FranciscaNeural (feminina)"],
-                index=0 if st.session_state.voz == "pt-BR-AntonioNeural" else 1
+          voz = st.selectbox(
+    "Narrador",
+    ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"],
+    index=0
+)
+# O resto do código usa 'voz' diretamente
             )
             vel = st.slider(
                 "Velocidade", 0.8, 1.3,
