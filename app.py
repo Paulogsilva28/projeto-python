@@ -15,19 +15,14 @@ st.set_page_config(
 # --- 1. CSS CUSTOMIZADO ---
 st.markdown("""
 <style>
-    /* Centraliza e dá respiro ao layout */
     .main .block-container {
         padding-top: 2rem;
         padding-bottom: 3rem;
         max-width: 960px;
     }
-
-    /* Headers mais marcantes */
     h1, h2, h3 {
         font-weight: 700 !important;
     }
-
-    /* Badges de status/informação */
     .info-badge {
         display: inline-block;
         background: #2a2a40;
@@ -38,16 +33,12 @@ st.markdown("""
         margin-bottom: 1rem;
         border: 1px solid #3a3a55;
     }
-
-    /* Botões arredondados */
     .stButton > button {
         border-radius: 8px;
         font-weight: 600;
         padding: 0.55rem 1.8rem;
         transition: all 0.2s;
     }
-
-    /* Esconde menu e footer padrão do Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -62,7 +53,7 @@ if 'voz' not in st.session_state:
 if 'velocidade' not in st.session_state:
     st.session_state.velocidade = 1.0
 
-# --- 3. HELPERS ---
+# --- 3. FUNÇÕES AUXILIARES ---
 def extrair_texto_pdf(uploaded_file):
     """Extrai texto de um PDF enviado pelo usuário."""
     reader = PdfReader(uploaded_file)
@@ -145,7 +136,9 @@ st.divider()
 # --- 5. ABAS ---
 aba1, aba2 = st.tabs(["📖 Editor de Texto", "🎙️ Estúdio de Áudio"])
 
-# --- ABA 1: EDITOR ---
+# ====================
+# ABA 1: EDITOR DE TEXTO
+# ====================
 with aba1:
     st.subheader("Entrada de Texto")
 
@@ -175,7 +168,9 @@ with aba1:
         chars = len(st.session_state.texto_final)
         st.success(f"Texto salvo ({chars:,} caracteres). Vá para o Estúdio de Áudio.")
 
-# --- ABA 2: ESTÚDIO ---
+# ====================
+# ABA 2: ESTÚDIO DE ÁUDIO
+# ====================
 with aba2:
     if not st.session_state.texto_final:
         st.info("O editor está vazio. Envie um PDF ou escreva algo na aba Editor de Texto.")
@@ -189,32 +184,40 @@ with aba2:
             unsafe_allow_html=True
         )
 
-        # Config + preview lado a lado
+        # Configurações e preview lado a lado
         col_settings, col_preview = st.columns([1, 2])
 
-with col_settings:
-    st.subheader("Ajustes")
-    voz = st.selectbox(
-        "Narrador",
-        ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"],
-        index=0
-    )
-    vel = st.slider(          # ← 4 espaços antes de 'vel'
-        "Velocidade",
-        0.8, 1.3,
-        float(st.session_state.velocidade),
-        0.05
- 
+        with col_settings:
+            st.subheader("Ajustes")
+
+            # Seleção de voz (diretamente com nomes técnicos)
+            voz = st.selectbox(
+                "Narrador",
+                ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"],
+                index=0 if st.session_state.voz == "pt-BR-AntonioNeural" else 1
             )
+
+            # Controle de velocidade
+            vel = st.slider(
+                "Velocidade",
+                min_value=0.8,
+                max_value=1.3,
+                value=float(st.session_state.velocidade),
+                step=0.05
+            )
+
+            # Atualiza estado
             st.session_state.voz = voz
             st.session_state.velocidade = vel
-            # Extrai nome curto da voz
-            voz_label = voz.split("(")[1].rstrip(")") if "(" in voz else voz.split("-")[2]
+
+            # Calcula rate no formato que edge-tts espera (ex: "+10%", "-5%")
             rate_val = round((vel - 1) * 100)
             rate = f"+{rate_val}%" if rate_val >= 0 else f"{rate_val}%"
 
+            # Mostra badges com as escolhas atuais
+            genero = "masculina" if "Antonio" in voz else "feminina"
             st.markdown(
-                f'<span class="info-badge">Voz: {voz_label}</span> '
+                f'<span class="info-badge">Voz: {genero}</span> '
                 f'<span class="info-badge">Rate: {rate}</span>',
                 unsafe_allow_html=True
             )
@@ -226,10 +229,10 @@ with col_settings:
                 value=st.session_state.texto_final,
                 height=280,
                 key="roteiro_final",
-                label_visibility="collapsed",
+                label_visibility="collapsed"
             )
 
-        # Botão de gerar
+        # Botão gerar audiobook
         if st.button("Gerar Audiobook", use_container_width=True, type="primary"):
             roteiro = st.session_state.roteiro_final
             progress_bar = st.progress(0, text="Iniciando síntese...")
