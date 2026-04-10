@@ -199,11 +199,12 @@ with col_settings:
         ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"],
         index=0
     )
-    # os outros widgets (velocidade, etc.) vêm aqui
-
-            vel = st.slider(
-                "Velocidade", 0.8, 1.3,
-                float(st.session_state.velocidade), 0.05
+    vel = st.slider(          # ← 4 espaços antes de 'vel'
+        "Velocidade",
+        0.8, 1.3,
+        float(st.session_state.velocidade),
+        0.05
+ 
             )
             st.session_state.voz = voz
             st.session_state.velocidade = vel
