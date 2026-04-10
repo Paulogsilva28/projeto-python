@@ -193,11 +193,11 @@ with aba2:
         col_settings, col_preview = st.columns([1, 2])
 
         with col_settings:
-            st.subheader("Ajustes")
+        st.subheader("Ajustes")
           voz = st.selectbox(
-    "Narrador",
-    ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"],
-    index=0
+            "Narrador",
+            ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"],
+            index=0
 )
 # O resto do código usa 'voz' diretamente
             )
