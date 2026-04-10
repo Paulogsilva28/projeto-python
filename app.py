@@ -198,9 +198,9 @@ with col_settings:
         "Narrador",
         ["pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"],
         index=0
-)
-# O resto do código usa 'voz' diretamente
-            
+    )
+    # os outros widgets (velocidade, etc.) vêm aqui
+
             vel = st.slider(
                 "Velocidade", 0.8, 1.3,
                 float(st.session_state.velocidade), 0.05
