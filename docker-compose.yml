@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  audiolivre:
+    build: .
+    container_name: audiolivre-studio
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mantém os dados da biblioteca persistentes no servidor caseiro do seu amigo
+      - ./audiolivre.db:/app/audiolivre.db
+    environment:
+      # O Docker lerá estas chaves a partir de um arquivo local chamado '.env'
+      - GEMINI_API_KEY=$GEMINI_API_KEY
+      - DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY
+    restart: unless-stopped
